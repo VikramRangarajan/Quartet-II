@@ -5,7 +5,7 @@ torch.set_float32_matmul_precision('high')
 import torch.nn.functional as F
 import triton
 import triton.language as tl
-
+from .fp8 import _fp8_to_fp32_impl, _fp32_to_fp8_impl
 
 @triton.jit
 def rtn_fp4(x):
@@ -56,7 +56,7 @@ def get_scales(x, amax, val_max, scales_max):
     )
     
     s_dec_b = tl.max(tl.abs(x), axis=-1, keep_dims=True) / val_max
-    s_dec_b_e4m3 = (s_dec_b / s_dec).to(tl.float8e4nv).to(tl.float32)
+    s_dec_b_e4m3 = _fp8_to_fp32_impl(_fp32_to_fp8_impl(s_dec_b / s_dec, True), True)
     s_dec_b_e4m3 = tl.where(
         s_dec_b_e4m3 == 0,
         1.0,
@@ -68,7 +68,7 @@ def get_scales(x, amax, val_max, scales_max):
 @triton.jit
 def get_alt_scales(x, val_max, s_dec):    
     s_dec_b = tl.max(tl.abs(x), axis=-1, keep_dims=True) / val_max
-    s_dec_b_e4m3 = (s_dec_b * (6/4) / s_dec).to(tl.float8e4nv).to(tl.float32)
+    s_dec_b_e4m3 = _fp8_to_fp32_impl(_fp32_to_fp8_impl(s_dec_b * (6/4) / s_dec, True), True)
     s_dec_b_e4m3 = tl.where(
         s_dec_b_e4m3 == 0,
         1.0,
@@ -219,11 +219,11 @@ def eden_1x16s_fp4_kernel(
     
     # Apply EDEN scale
     corrected_scales = s_dec_b_e4m3 * correction # [BLOCK_SIZE // group_size, 1]
-    
-    bitscales = tl.cast(corrected_scales.to(tl.float8e4nv), tl.uint8, bitcast=True)
-    prevscale = tl.cast((bitscales - 1), tl.float8e4nv, bitcast=True).to(tl.float32)
-    currscale = tl.cast((bitscales), tl.float8e4nv, bitcast=True).to(tl.float32)
-    nextscale = tl.cast((bitscales + 1), tl.float8e4nv, bitcast=True).to(tl.float32)
+
+    bitscales = _fp32_to_fp8_impl(corrected_scales, True)
+    prevscale = _fp8_to_fp32_impl(bitscales - 1, True)
+    currscale = _fp8_to_fp32_impl(bitscales, True)
+    nextscale = _fp8_to_fp32_impl(bitscales + 1, True)
     
     up = tl.where(
         currscale > corrected_scales,
