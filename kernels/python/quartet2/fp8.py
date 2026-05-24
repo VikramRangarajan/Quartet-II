@@ -238,15 +238,16 @@ def _fp8_to_fp32_impl(x, IS_E4M3: tl.constexpr):
         mant_lz = tl.where(mantissa >= 4, 0, tl.where(mantissa >= 2, 1, 2))
     else:
         mant_lz = tl.where(mantissa >= 2, 0, 1)
-    mantissa_sub = (mantissa << mant_lz) & FP8_MANTISSA_MASK
-    exp_sub = (exp + (FP32_EXPONENT_BIAS - FP8_EXPONENT_BIAS) + 1 - mant_lz).to(
-        tl.uint32
-    )
+    # CUTLASS: exp += bias + 1, then loop shifting while ((mant & (1 << mbits)) == 0)
+    # We unroll the loop: shift by (mant_lz + 1) to place leading 1 at bit FP8_NUM_MANTISSA_BITS
+    mantissa_norm = (mantissa << (mant_lz + 1)) & (FP8_MANTISSA_MASK << 1)
+    mantissa_frac = mantissa_norm & FP8_MANTISSA_MASK
+    exp_sub = (exp + (FP32_EXPONENT_BIAS - FP8_EXPONENT_BIAS) - mant_lz).to(tl.uint32)
     f_subnormal = (
         f
         | (exp_sub << FP32_NUM_MANTISSA_BITS)
         | (
-            mantissa_sub.to(tl.uint32)
+            mantissa_frac.to(tl.uint32)
             << (FP32_NUM_MANTISSA_BITS - FP8_NUM_MANTISSA_BITS)
         )
     )
