@@ -145,3 +145,4 @@ user.yaml
 
 temp/
 *.DS_Store
+uv.lock
