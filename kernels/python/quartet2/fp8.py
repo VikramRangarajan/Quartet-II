@@ -287,19 +287,18 @@ def _fp8_to_fp32_impl(x, IS_E4M3: tl.constexpr):
     # Subnormal override
     result = tl.where(is_subnormal, f_subnormal, result)
 
-    # Zero (exp == 0 && mantissa == 0) — f already has sign bit, just keep it
-    # No override needed for zero case
+    # Zero: exp == 0 && mantissa == 0 — sign-preserving zero (f already has sign)
+    is_zero = (exp == 0) & (mantissa == 0)
+    result = tl.where(is_zero, f, result)
 
-    # NaN (E4M3 case handled above; remaining overflow cases)
-    is_overflow_exp = exp > 0
-    if IS_E4M3:
-        is_overflow_exp = is_overflow_exp & (exp == 15) & (mantissa != 0x7)
-    else:
+    # E5M2 only: overflow exp (all ones) → Inf (mant==0) or NaN (mant!=0)
+    # For E4M3, exp=15 is only NaN when mant==7; handled by is_e4m3_nan above
+    if not IS_E4M3:
         is_overflow_exp = exp == (
             FP8_MAX_EXPONENT + FP8_EXPONENT_BIAS + 1
         )  # exp == 31 for E5M2
-    result = tl.where(is_overflow_exp & is_inf_fp8, f_inf, result)
-    result = tl.where(is_overflow_exp & (~is_inf_fp8), f_nan_remaining, result)
+        result = tl.where(is_overflow_exp & is_inf_fp8, f_inf, result)
+        result = tl.where(is_overflow_exp & (~is_inf_fp8), f_nan_remaining, result)
 
     return tl.cast(result, tl.float32, bitcast=True)
 
