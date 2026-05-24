@@ -146,3 +146,4 @@ user.yaml
 temp/
 *.DS_Store
 uv.lock
+kernels/bench/

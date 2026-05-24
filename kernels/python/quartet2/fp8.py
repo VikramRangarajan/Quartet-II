@@ -1,4 +1,3 @@
-from functools import partial
 import torch
 import triton.language as tl
 import triton
@@ -52,6 +51,8 @@ def _fp32_to_fp8_impl(flt, IS_E4M3: tl.constexpr):
     FP8_MANTISSA_MASK = (1 << FP8_NUM_MANTISSA_BITS) - 1
 
     kF8_NaN = 0x7F
+
+    flt = flt.to(tl.float32)
 
     # Extract bits from fp32
     s = tl.cast(flt, tl.uint32, bitcast=True)
@@ -178,33 +179,9 @@ def _fp32_to_fp8_impl(flt, IS_E4M3: tl.constexpr):
 
 
 @triton.jit
-def _fp32_to_fp8(flt, out, n, is_e4m3):
-    n_range = tl.arange(0, 32)
-    for i in range(0, n, 32):
-        cur_range = n_range + i
-        val = _fp32_to_fp8_impl(
-            tl.load(flt + cur_range, mask=cur_range < n), IS_E4M3=is_e4m3
-        )
-        tl.store(out + cur_range, val, mask=cur_range < n)
-
-
-def fp32_to_fp8e4nv(tens: torch.Tensor):
-    assert tens.is_contiguous() and tens.is_cuda
-    out = torch.empty(tens.shape, dtype=torch.uint8, device="cuda")
-    _fp32_to_fp8e4nv[(1,)](tens, out, tens.numel())
-    return out
-
-
-@triton.jit
-def _fp32_to_fp8e5m2(flt, out):
-    val = _fp32_to_fp8_impl(tl.load(flt), IS_E4M3=False)
-    tl.store(out, val)
-
-
-@triton.jit
 def _fp8_to_fp32_impl(x, IS_E4M3: tl.constexpr):
     FP32_NUM_BITS = 32
-    FP32_NUM_EXPONENT_BITS = 8
+    # FP32_NUM_EXPONENT_BITS = 8
     FP32_NUM_MANTISSA_BITS = 23
     FP32_EXPONENT_BIAS = 127
     FP32_INFINITY_MASK = 0x7F800000
@@ -214,13 +191,13 @@ def _fp8_to_fp32_impl(x, IS_E4M3: tl.constexpr):
         FP8_NUM_MANTISSA_BITS = 3
         FP8_EXPONENT_BIAS = 7
         FP8_MAX_EXPONENT = 7
-        FP8_MAX_FLT = 0x7E
+        # FP8_MAX_FLT = 0x7E
     else:
         FP8_NUM_EXPONENT_BITS = 5
         FP8_NUM_MANTISSA_BITS = 2
         FP8_EXPONENT_BIAS = 15
         FP8_MAX_EXPONENT = 15
-        FP8_MAX_FLT = 0x7B
+        # FP8_MAX_FLT = 0x7B
 
     FP8_EXPONENT_MASK = (1 << FP8_NUM_EXPONENT_BITS) - 1
     FP8_MANTISSA_MASK = (1 << FP8_NUM_MANTISSA_BITS) - 1
@@ -324,7 +301,8 @@ def elementwise_template(triton_fn, x, n, out, BLOCK_SIZE: tl.constexpr):
 def fp32_to_fp8e4nv(tens):
     tens = tens.contiguous()
     out = torch.empty(tens.shape, dtype=torch.uint8, device="cuda")
-    grid = lambda meta: (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
+    def grid(meta):
+        return (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
 
     @triton.jit
     def _fp32_to_fp8e4nv_impl(flt):
@@ -333,10 +311,25 @@ def fp32_to_fp8e4nv(tens):
     elementwise_template[grid](_fp32_to_fp8e4nv_impl, tens, tens.numel(), out)
     return out
 
+
+def fp32_to_fp8e5(tens):
+    tens = tens.contiguous()
+    out = torch.empty(tens.shape, dtype=torch.uint8, device="cuda")
+    def grid(meta):
+        return (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
+
+    @triton.jit
+    def _fp32_to_fp8e5_impl(flt):
+        return _fp32_to_fp8_impl(flt, False)
+
+    elementwise_template[grid](_fp32_to_fp8e5_impl, tens, tens.numel(), out)
+    return out
+
+
 def fp8e4nv_to_fp32(tens):
     tens = tens.contiguous()
     out = torch.empty(tens.shape, dtype=torch.float32, device="cuda")
-    grid = lambda meta: (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
+    def grid(meta): return (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
 
     @triton.jit
     def _fp8e4nv_to_fp32_impl(flt):
@@ -345,6 +338,76 @@ def fp8e4nv_to_fp32(tens):
     elementwise_template[grid](_fp8e4nv_to_fp32_impl, tens, tens.numel(), out)
     return out
 
-@triton.jit
-def fp8e5m2_to_fp32(x):
-    return _fp8_to_fp32_impl(x, IS_E4M3=False)
+
+def fp8e5_to_fp32(tens):
+    tens = tens.contiguous()
+    out = torch.empty(tens.shape, dtype=torch.float32, device="cuda")
+    def grid(meta):
+        return (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
+
+    @triton.jit
+    def _fp8e5_to_fp32_impl(flt):
+        return _fp8_to_fp32_impl(flt, IS_E4M3=False)
+
+    elementwise_template[grid](_fp8e5_to_fp32_impl, tens, tens.numel(), out)
+    return out
+
+def fp32_fp8e4nv_fq(tens):
+    tens = tens.contiguous()
+    out = torch.empty(tens.shape, dtype=torch.float32, device="cuda")
+    def grid(meta):
+        return (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
+
+    @triton.jit
+    def _fp32_fp8_fq_impl(flt):
+        return _fp8_to_fp32_impl(_fp32_to_fp8_impl(flt, True), True)
+
+    elementwise_template[grid](_fp32_fp8_fq_impl, tens, tens.numel(), out)
+    return out
+
+def fp32_fp8e5_fq(tens):
+    tens = tens.contiguous()
+    out = torch.empty(tens.shape, dtype=torch.float32, device="cuda")
+    def grid(meta):
+        return (triton.cdiv(tens.numel(), meta["BLOCK_SIZE"]),)
+
+    @triton.jit
+    def _fp32_fp8_fq_impl(flt):
+        return _fp8_to_fp32_impl(_fp32_to_fp8_impl(flt, False), False)
+
+    elementwise_template[grid](_fp32_fp8_fq_impl, tens, tens.numel(), out)
+    return out
+
+@triton.testing.perf_report(
+    triton.testing.Benchmark(
+        x_names=["size"],  # Argument names to use as an x-axis for the plot.
+        x_vals=[
+            2**i for i in range(12, 29, 1)
+        ],  # Different possible values for `x_name`.
+        x_log=True,  # x axis is logarithmic.
+        line_arg="provider",  # Argument name whose value corresponds to a different line in the plot.
+        line_vals=["triton", "torch"],  # Possible values for `line_arg`.
+        line_names=[
+            "fp4 quant/dequant",
+            "torch f32->i8->f32",
+        ],  # Label name for the lines.
+        styles=[("blue", "-"), ("green", "-")],  # Line styles.
+        ylabel="GB/s",  # Label name for the y-axis.
+        plot_name="fp8-quant-performance",  # Name for the plot. Used also as a file name for saving the plot.
+        args={},  # Values for function arguments not in `x_names` and `y_name`.
+    )
+)
+def fp8_cast_benchmark(size, provider):
+    x = torch.rand(size, device="cuda", dtype=torch.float32)
+    quantiles = [0.5, 0.2, 0.8]
+    if provider == "torch":
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: x.to(torch.int8).to(torch.float32), quantiles=quantiles
+        )
+    if provider == "triton":
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: fp8e4nv_to_fp32(fp32_to_fp8e4nv(x)), quantiles=quantiles
+        )
+    def gbps(ms):
+        return 10 * x.numel() * 1e-9 / (ms * 1e-3)
+    return gbps(ms), gbps(max_ms), gbps(min_ms)
