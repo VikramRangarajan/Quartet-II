@@ -8,6 +8,7 @@ from quartet2.fp8 import (
     fp32_fp8e4nv_fq,
     fp32_fp8e5_fq,
 )
+import numpy as np
 
 torch.random.manual_seed(42)
 
@@ -16,185 +17,39 @@ def _is_nan(x):
     return x != x
 
 
-# ── E4M3 encode (fp32 → fp8) ─────────────────────────────────────────────────
+# We got these values by running cutlass's float8.h casting on every possible float8 value (uint8 repr 0-255)
 
-@pytest.mark.parametrize(
-    "x, expected",
-    [
-        (0.0, 0x00),
-        (-0.0, 0x80),
-        (1.0, 0x38),
-        (1.5, 0x3C),
-        (2.0, 0x40),
-        (-1.0, 0xB8),
-        (-2.0, 0xC0),
-        (50.0, 0x64),
-        (-5.0, 0xCA),
-        (448.0, 0x7E),
-        (-448.0, 0xFE),
-        (240.0, 0x77),
-        (-240.0, 0xF7),
-        (float("inf"), 0x7E),
-        (float("-inf"), 0xFE),
-        (float("nan"), 0x7F),
-    ],
-)
-def test_fp32_to_fp8_e4m3(x, expected):
-    t = torch.tensor([x], device="cuda", dtype=torch.float32)
-    out = fp32_to_fp8e4nv(t)
-    if _is_nan(x):
-        assert out[0].item() == 0x7F
-    else:
-        assert out[0].item() == expected, f"{x} → {hex(out[0].item())}, expected {hex(expected)}"
+fp8_bits = torch.arange(0, 256, dtype=torch.uint8, device="cuda")
+fp8e4_fp32_bits = torch.from_numpy(np.array([0x0, 0x3b000000, 0x3b800000, 0x3bc00000, 0x3c000000, 0x3c200000, 0x3c400000, 0x3c600000, 0x3c800000, 0x3c900000, 0x3ca00000, 0x3cb00000, 0x3cc00000, 0x3cd00000, 0x3ce00000, 0x3cf00000, 0x3d000000, 0x3d100000, 0x3d200000, 0x3d300000, 0x3d400000, 0x3d500000, 0x3d600000, 0x3d700000, 0x3d800000, 0x3d900000, 0x3da00000, 0x3db00000, 0x3dc00000, 0x3dd00000, 0x3de00000, 0x3df00000, 0x3e000000, 0x3e100000, 0x3e200000, 0x3e300000, 0x3e400000, 0x3e500000, 0x3e600000, 0x3e700000, 0x3e800000, 0x3e900000, 0x3ea00000, 0x3eb00000, 0x3ec00000, 0x3ed00000, 0x3ee00000, 0x3ef00000, 0x3f000000, 0x3f100000, 0x3f200000, 0x3f300000, 0x3f400000, 0x3f500000, 0x3f600000, 0x3f700000, 0x3f800000, 0x3f900000, 0x3fa00000, 0x3fb00000, 0x3fc00000, 0x3fd00000, 0x3fe00000, 0x3ff00000, 0x40000000, 0x40100000, 0x40200000, 0x40300000, 0x40400000, 0x40500000, 0x40600000, 0x40700000, 0x40800000, 0x40900000, 0x40a00000, 0x40b00000, 0x40c00000, 0x40d00000, 0x40e00000, 0x40f00000, 0x41000000, 0x41100000, 0x41200000, 0x41300000, 0x41400000, 0x41500000, 0x41600000, 0x41700000, 0x41800000, 0x41900000, 0x41a00000, 0x41b00000, 0x41c00000, 0x41d00000, 0x41e00000, 0x41f00000, 0x42000000, 0x42100000, 0x42200000, 0x42300000, 0x42400000, 0x42500000, 0x42600000, 0x42700000, 0x42800000, 0x42900000, 0x42a00000, 0x42b00000, 0x42c00000, 0x42d00000, 0x42e00000, 0x42f00000, 0x43000000, 0x43100000, 0x43200000, 0x43300000, 0x43400000, 0x43500000, 0x43600000, 0x43700000, 0x43800000, 0x43900000, 0x43a00000, 0x43b00000, 0x43c00000, 0x43d00000, 0x43e00000, 0x7fffffff, 0x80000000, 0xbb000000, 0xbb800000, 0xbbc00000, 0xbc000000, 0xbc200000, 0xbc400000, 0xbc600000, 0xbc800000, 0xbc900000, 0xbca00000, 0xbcb00000, 0xbcc00000, 0xbcd00000, 0xbce00000, 0xbcf00000, 0xbd000000, 0xbd100000, 0xbd200000, 0xbd300000, 0xbd400000, 0xbd500000, 0xbd600000, 0xbd700000, 0xbd800000, 0xbd900000, 0xbda00000, 0xbdb00000, 0xbdc00000, 0xbdd00000, 0xbde00000, 0xbdf00000, 0xbe000000, 0xbe100000, 0xbe200000, 0xbe300000, 0xbe400000, 0xbe500000, 0xbe600000, 0xbe700000, 0xbe800000, 0xbe900000, 0xbea00000, 0xbeb00000, 0xbec00000, 0xbed00000, 0xbee00000, 0xbef00000, 0xbf000000, 0xbf100000, 0xbf200000, 0xbf300000, 0xbf400000, 0xbf500000, 0xbf600000, 0xbf700000, 0xbf800000, 0xbf900000, 0xbfa00000, 0xbfb00000, 0xbfc00000, 0xbfd00000, 0xbfe00000, 0xbff00000, 0xc0000000, 0xc0100000, 0xc0200000, 0xc0300000, 0xc0400000, 0xc0500000, 0xc0600000, 0xc0700000, 0xc0800000, 0xc0900000, 0xc0a00000, 0xc0b00000, 0xc0c00000, 0xc0d00000, 0xc0e00000, 0xc0f00000, 0xc1000000, 0xc1100000, 0xc1200000, 0xc1300000, 0xc1400000, 0xc1500000, 0xc1600000, 0xc1700000, 0xc1800000, 0xc1900000, 0xc1a00000, 0xc1b00000, 0xc1c00000, 0xc1d00000, 0xc1e00000, 0xc1f00000, 0xc2000000, 0xc2100000, 0xc2200000, 0xc2300000, 0xc2400000, 0xc2500000, 0xc2600000, 0xc2700000, 0xc2800000, 0xc2900000, 0xc2a00000, 0xc2b00000, 0xc2c00000, 0xc2d00000, 0xc2e00000, 0xc2f00000, 0xc3000000, 0xc3100000, 0xc3200000, 0xc3300000, 0xc3400000, 0xc3500000, 0xc3600000, 0xc3700000, 0xc3800000, 0xc3900000, 0xc3a00000, 0xc3b00000, 0xc3c00000, 0xc3d00000, 0xc3e00000, 0x7fffffff], dtype=np.uint32).view(np.float32)).cuda() # noqa
 
+fp8e5_fp32_bits = torch.from_numpy(np.array([0x0, 0x37800000, 0x38000000, 0x38400000, 0x38800000, 0x38a00000, 0x38c00000, 0x38e00000, 0x39000000, 0x39200000, 0x39400000, 0x39600000, 0x39800000, 0x39a00000, 0x39c00000, 0x39e00000, 0x3a000000, 0x3a200000, 0x3a400000, 0x3a600000, 0x3a800000, 0x3aa00000, 0x3ac00000, 0x3ae00000, 0x3b000000, 0x3b200000, 0x3b400000, 0x3b600000, 0x3b800000, 0x3ba00000, 0x3bc00000, 0x3be00000, 0x3c000000, 0x3c200000, 0x3c400000, 0x3c600000, 0x3c800000, 0x3ca00000, 0x3cc00000, 0x3ce00000, 0x3d000000, 0x3d200000, 0x3d400000, 0x3d600000, 0x3d800000, 0x3da00000, 0x3dc00000, 0x3de00000, 0x3e000000, 0x3e200000, 0x3e400000, 0x3e600000, 0x3e800000, 0x3ea00000, 0x3ec00000, 0x3ee00000, 0x3f000000, 0x3f200000, 0x3f400000, 0x3f600000, 0x3f800000, 0x3fa00000, 0x3fc00000, 0x3fe00000, 0x40000000, 0x40200000, 0x40400000, 0x40600000, 0x40800000, 0x40a00000, 0x40c00000, 0x40e00000, 0x41000000, 0x41200000, 0x41400000, 0x41600000, 0x41800000, 0x41a00000, 0x41c00000, 0x41e00000, 0x42000000, 0x42200000, 0x42400000, 0x42600000, 0x42800000, 0x42a00000, 0x42c00000, 0x42e00000, 0x43000000, 0x43200000, 0x43400000, 0x43600000, 0x43800000, 0x43a00000, 0x43c00000, 0x43e00000, 0x44000000, 0x44200000, 0x44400000, 0x44600000, 0x44800000, 0x44a00000, 0x44c00000, 0x44e00000, 0x45000000, 0x45200000, 0x45400000, 0x45600000, 0x45800000, 0x45a00000, 0x45c00000, 0x45e00000, 0x46000000, 0x46200000, 0x46400000, 0x46600000, 0x46800000, 0x46a00000, 0x46c00000, 0x46e00000, 0x47000000, 0x47200000, 0x47400000, 0x47600000, 0x7f800000, 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x80000000, 0xb7800000, 0xb8000000, 0xb8400000, 0xb8800000, 0xb8a00000, 0xb8c00000, 0xb8e00000, 0xb9000000, 0xb9200000, 0xb9400000, 0xb9600000, 0xb9800000, 0xb9a00000, 0xb9c00000, 0xb9e00000, 0xba000000, 0xba200000, 0xba400000, 0xba600000, 0xba800000, 0xbaa00000, 0xbac00000, 0xbae00000, 0xbb000000, 0xbb200000, 0xbb400000, 0xbb600000, 0xbb800000, 0xbba00000, 0xbbc00000, 0xbbe00000, 0xbc000000, 0xbc200000, 0xbc400000, 0xbc600000, 0xbc800000, 0xbca00000, 0xbcc00000, 0xbce00000, 0xbd000000, 0xbd200000, 0xbd400000, 0xbd600000, 0xbd800000, 0xbda00000, 0xbdc00000, 0xbde00000, 0xbe000000, 0xbe200000, 0xbe400000, 0xbe600000, 0xbe800000, 0xbea00000, 0xbec00000, 0xbee00000, 0xbf000000, 0xbf200000, 0xbf400000, 0xbf600000, 0xbf800000, 0xbfa00000, 0xbfc00000, 0xbfe00000, 0xc0000000, 0xc0200000, 0xc0400000, 0xc0600000, 0xc0800000, 0xc0a00000, 0xc0c00000, 0xc0e00000, 0xc1000000, 0xc1200000, 0xc1400000, 0xc1600000, 0xc1800000, 0xc1a00000, 0xc1c00000, 0xc1e00000, 0xc2000000, 0xc2200000, 0xc2400000, 0xc2600000, 0xc2800000, 0xc2a00000, 0xc2c00000, 0xc2e00000, 0xc3000000, 0xc3200000, 0xc3400000, 0xc3600000, 0xc3800000, 0xc3a00000, 0xc3c00000, 0xc3e00000, 0xc4000000, 0xc4200000, 0xc4400000, 0xc4600000, 0xc4800000, 0xc4a00000, 0xc4c00000, 0xc4e00000, 0xc5000000, 0xc5200000, 0xc5400000, 0xc5600000, 0xc5800000, 0xc5a00000, 0xc5c00000, 0xc5e00000, 0xc6000000, 0xc6200000, 0xc6400000, 0xc6600000, 0xc6800000, 0xc6a00000, 0xc6c00000, 0xc6e00000, 0xc7000000, 0xc7200000, 0xc7400000, 0xc7600000, 0xff800000, 0x7fffffff, 0x7fffffff, 0x7fffffff], dtype=np.uint32).view(np.float32)).cuda() # noqa
 
-# ── E4M3 decode (fp8 → fp32) ─────────────────────────────────────────────────
+def equal_or_nan(a, b):
+    return torch.logical_or(a == b, torch.logical_and(a.isnan(), b.isnan()))
 
-@pytest.mark.parametrize(
-    "x, expected",
-    [
-        (0x00, 0.0),
-        (0x80, -0.0),
-        (0x38, 1.0),
-        (0x3C, 1.5),
-        (0x40, 2.0),
-        (0xB8, -1.0),
-        (0xC0, -2.0),
-        (0x64, 48.0),
-        (0xCA, -5.0),
-        (0x7E, 448.0),
-        (0xFE, -448.0),
-        (0x77, 240.0),
-        (0xF7, -240.0),
-        (0x01, 2.0 ** -9),
-        (0x04, 2.0 ** -7),
-        (0x7F, float("nan")),
-    ],
-)
-def test_fp8_to_fp32_e4m3(x, expected):
-    t = torch.tensor([x], device="cuda", dtype=torch.uint8)
-    out = fp8e4nv_to_fp32(t)
-    if _is_nan(expected):
-        assert _is_nan(out[0].item())
-    else:
-        assert out[0].item() == pytest.approx(expected, abs=1e-7)
+def test_fp32_to_fp8_e4m3():
+    out = fp32_to_fp8e4nv(fp8e4_fp32_bits)
+    assert equal_or_nan(out, fp8_bits)[:-1].all() # Last one is the repr for nan
+    assert out[-1] == 127
 
+def test_fp8_e4m3_to_fp32():
+    out = fp8e4nv_to_fp32(fp8_bits)
+    assert equal_or_nan(out, fp8e4_fp32_bits).all()
 
-# ── E5M2 encode (fp32 → fp8) ─────────────────────────────────────────────────
+def test_fp32_to_fp8_e5m2():
+    out = fp32_to_fp8e5(fp8e5_fp32_bits)
+    assert (out == fp8_bits).all()
 
-@pytest.mark.parametrize(
-    "x, expected",
-    [
-        (0.0, 0x00),
-        (-0.0, 0x80),
-        (1.0, 0x3C),
-        (1.5, 0x3E),
-        (2.0, 0x40),
-        (-1.0, 0xBC),
-        (-2.0, 0xC0),
-        (57344.0, 0x7B),
-        (-57344.0, 0xFB),
-        (float("inf"), 0x7B),
-        (float("-inf"), 0xFB),
-        (float("nan"), 0x7F),
-    ],
-)
-def test_fp32_to_fp8_e5m2(x, expected):
-    t = torch.tensor([x], device="cuda", dtype=torch.float32)
-    out = fp32_to_fp8e5(t)
-    if _is_nan(x):
-        assert out[0].item() == 0x7F
-    else:
-        assert out[0].item() == expected, f"{x} → {hex(out[0].item())}, expected {hex(expected)}"
+def test_fp8_e5m2_to_fp32():
+    out = fp8e5_to_fp32(fp8_bits)
+    assert equal_or_nan(out, fp8e5_fp32_bits).all()
 
+def test_fp8e4_fq():
+    out = fp32_fp8e4nv_fq(fp8e4_fp32_bits)
+    fq_two_kernel = fp8e4nv_to_fp32(fp32_to_fp8e4nv(fp8e4_fp32_bits))
+    assert equal_or_nan(out, fq_two_kernel).all()
 
-# ── E5M2 decode (fp8 → fp32) ─────────────────────────────────────────────────
-
-@pytest.mark.parametrize(
-    "x, expected",
-    [
-        (0x00, 0.0),
-        (0x80, -0.0),
-        (0x3C, 1.0),
-        (0x3E, 1.5),
-        (0x40, 2.0),
-        (0xBC, -1.0),
-        (0xC0, -2.0),
-        (0x7B, 57344.0),
-        (0xFB, -57344.0),
-        (0x7C, float("inf")),
-        (0xFC, float("-inf")),
-        (0x7D, float("nan")),
-        (0x7E, float("nan")),
-        (0x7F, float("nan")),
-        (0x01, 2.0 ** -16),
-        (0x04, 2.0 ** -14),
-    ],
-)
-def test_fp8_to_fp32_e5m2(x, expected):
-    t = torch.tensor([x], device="cuda", dtype=torch.uint8)
-    out = fp8e5_to_fp32(t)
-    if _is_nan(expected):
-        assert _is_nan(out[0].item())
-    elif expected == float("inf"):
-        assert out[0].item() == float("inf")
-    elif expected == float("-inf"):
-        assert out[0].item() == float("-inf")
-    else:
-        assert out[0].item() == pytest.approx(expected, abs=1e-7)
-
-
-# ── Fake quant equivalence: fused roundtrip = encode then decode ─────────────
-
-@pytest.mark.parametrize("dtype", ["e4m3", "e5m2"])
-def test_fake_quant_equals_separate(dtype):
-    x = torch.randn(256, device="cuda", dtype=torch.float32)
-    if dtype == "e4m3":
-        fq = fp32_fp8e4nv_fq(x)
-        separate = fp8e4nv_to_fp32(fp32_to_fp8e4nv(x))
-    else:
-        fq = fp32_fp8e5_fq(x)
-        separate = fp8e5_to_fp32(fp32_to_fp8e5(x))
-    torch.testing.assert_close(fq, separate)
-
-
-# ── Fake quant bitwidth sanity (f32→fp8→f32 should be near expected bits) ───
-
-@pytest.mark.parametrize(
-    "decode_fn, expected_bits",
-    [(fp32_fp8e4nv_fq, 4.0), (fp32_fp8e5_fq, 4.0)],
-)
-def test_fake_quant_bitwidth(decode_fn, expected_bits):
-    x = torch.randn(4096, 2048, device="cuda", dtype=torch.float32)
-    dq = decode_fn(x)
-    mse = (x - dq).pow(2).mean()
-    power = x.pow(2).mean()
-    sqnr = power / mse
-    eff_bits = 0.5 * torch.log2(sqnr)
-    assert eff_bits > expected_bits, f"Effective bitwidth {eff_bits:.2f} < {expected_bits}"
-
-
-# ── Roundtrip accuracy on finite values ──────────────────────────────────────
-
-def test_e4m3_roundtrip_finite():
-    x = torch.tensor(
-        [0.0, -0.0, 1.0, -1.0, 2.0, 50.0, -5.0, 0.5, 0.0078125],
-        device="cuda",
-        dtype=torch.float32,
-    )
-    rt = fp8e4nv_to_fp32(fp32_to_fp8e4nv(x))
-    for inp, out in zip(x.tolist(), rt.tolist()):
-        err = abs(inp - out) / max(abs(inp), 1e-30)
-        assert err < 0.5, f"Large relative error for {inp}: got {out}"
-
-
-def test_e5m2_roundtrip_finite():
-    x = torch.tensor(
-        [0.0, -0.0, 1.0, -1.0, 2.0, 57344.0, -57344.0, 0.5, 2.0 ** -14],
-        device="cuda",
-        dtype=torch.float32,
-    )
-    rt = fp8e5_to_fp32(fp32_to_fp8e5(x))
-    for inp, out in zip(x.tolist(), rt.tolist()):
-        err = abs(inp - out) / max(abs(inp), 1e-30)
-        assert err < 0.5, f"Large relative error for {inp}: got {out}"
+def test_fp8e5_fq():
+    out = fp32_fp8e5_fq(fp8e5_fp32_bits)
+    fq_two_kernel = fp8e5_to_fp32(fp32_to_fp8e5(fp8e5_fp32_bits))
+    assert equal_or_nan(out, fq_two_kernel).all()
