@@ -29,7 +29,7 @@ def equal_or_nan(a, b):
 
 def test_fp32_to_fp8_e4m3():
     out = fp32_to_fp8e4nv(fp8e4_fp32_bits)
-    assert equal_or_nan(out, fp8_bits)[:-1].all() # Last one is the repr for nan
+    assert (out == fp8_bits)[:-1].all() # Last one is the repr for nan
     assert out[-1] == 127
 
 def test_fp8_e4m3_to_fp32():
@@ -38,6 +38,13 @@ def test_fp8_e4m3_to_fp32():
 
 def test_fp32_to_fp8_e5m2():
     out = fp32_to_fp8e5(fp8e5_fp32_bits)
+    breakpoint()
+    """
+    (Pdb) out[out != fp8_bits]
+    tensor([123, 127, 127, 251, 127, 127, 127], device='cuda:0', dtype=torch.uint8)
+    (Pdb) fp8_bits[out != fp8_bits]
+    tensor([124, 125, 126, 252, 253, 254, 255], device='cuda:0', dtype=torch.uint8)
+    """
     assert (out == fp8_bits).all()
 
 def test_fp8_e5m2_to_fp32():

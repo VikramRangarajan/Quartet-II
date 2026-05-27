@@ -2,10 +2,6 @@ import torch
 import triton.language as tl
 import triton
 
-VERSION = 9
-print("VERSION", VERSION)
-
-
 @triton.jit
 def _isnan(flt):
     s = tl.cast(flt, tl.uint32, bitcast=True)

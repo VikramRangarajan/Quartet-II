@@ -147,3 +147,4 @@ temp/
 *.DS_Store
 uv.lock
 kernels/bench/
+*.out
