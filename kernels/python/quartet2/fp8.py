@@ -17,7 +17,7 @@ def _isinf(flt):
 @triton.jit
 def _fp32_to_fp8_impl(flt, IS_E4M3: tl.constexpr):
     # NaN -> fp8 NaN
-    # +-inf -> +- fp8 max
+    # +-inf -> +- fp8 inf encoding (or max for E4M3)
     # exp==128 (127->overflow to -128) -> +-fp8 max
     # exp > max exp and ((exp == max exp and mantissa_tmp >= mask) or exp != max exp) -> +- fp8 max
     # Otherwise follow code path
@@ -35,6 +35,7 @@ def _fp32_to_fp8_impl(flt, IS_E4M3: tl.constexpr):
         FP8_MAX_EXPONENT = 7
         FP8_MIN_EXPONENT = -6
         FP8_MAX_FLT = 0x7E
+        FP8_INF_FLT = FP8_MAX_FLT
     else:
         FP8_NUM_EXPONENT_BITS = 5
         FP8_NUM_MANTISSA_BITS = 2
@@ -42,6 +43,7 @@ def _fp32_to_fp8_impl(flt, IS_E4M3: tl.constexpr):
         FP8_MAX_EXPONENT = 15
         FP8_MIN_EXPONENT = -14
         FP8_MAX_FLT = 0x7B
+        FP8_INF_FLT = 0x7C
 
     FP8_EXPONENT_MASK = (1 << FP8_NUM_EXPONENT_BITS) - 1
     FP8_MANTISSA_MASK = (1 << FP8_NUM_MANTISSA_BITS) - 1
@@ -164,11 +166,19 @@ def _fp32_to_fp8_impl(flt, IS_E4M3: tl.constexpr):
     u_final = tl.where(skip_sign == 0, (u_rounded | sign), u_rounded)
 
     # Early exit overrides (last = highest priority)
+    # Overflow saturation / exp=-128 → max saturate
     result = tl.where(
-        is_inf | is_exp_neg128 | is_overflow_sat,
+        is_exp_neg128 | is_overflow_sat,
         (sign | FP8_MAX_FLT).to(tl.uint8),
         u_final,
     )
+    # Inf → Inf encoding (E5M2) or max (E4M3)
+    result = tl.where(
+        is_inf,
+        (sign | FP8_INF_FLT).to(tl.uint8),
+        result,
+    )
+    # NaN → kF8_NaN (highest priority)
     result = tl.where(is_nan, tl.full(u_final.shape, kF8_NaN, tl.uint8), result)
 
     return result
@@ -207,7 +217,7 @@ def _fp8_to_fp32_impl(x, IS_E4M3: tl.constexpr):
 
     # E4M3 specific: check for NaN pattern (exp == 15, mantissa == 0x7)
     is_e4m3_nan = (
-        tl.full(x.shape, 0, tl.int8) if not IS_E4M3 else (exp == 15) & (mantissa == 0x7)
+        tl.full(x.shape, False, tl.int1) if not IS_E4M3 else ((exp == 15) & (mantissa == 0x7))
     )
     nan_result = tl.full(f.shape, kF32_NaN, tl.uint32)
 

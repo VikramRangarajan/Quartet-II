@@ -38,14 +38,13 @@ def test_fp8_e4m3_to_fp32():
 
 def test_fp32_to_fp8_e5m2():
     out = fp32_to_fp8e5(fp8e5_fp32_bits)
-    breakpoint()
-    """
-    (Pdb) out[out != fp8_bits]
-    tensor([123, 127, 127, 251, 127, 127, 127], device='cuda:0', dtype=torch.uint8)
-    (Pdb) fp8_bits[out != fp8_bits]
-    tensor([124, 125, 126, 252, 253, 254, 255], device='cuda:0', dtype=torch.uint8)
-    """
-    assert (out == fp8_bits).all()
+    # CUTLASS decoder maps all NaN encodings to the same fp32 value (0x7FFFFFFF),
+    # so NaN payloads (0x7D-0x7E, 0xFD-0xFE) can't roundtrip — all map to kF8_NaN (0x7F).
+    # Check non-NaN positions match exactly.
+    nan_fp32 = fp8e5_fp32_bits.isnan()
+    assert (out[~nan_fp32] == fp8_bits[~nan_fp32]).all()
+    # NaN positions: any NaN encoding is acceptable
+    assert out[nan_fp32].tolist() == [0x7F] * nan_fp32.sum().item()
 
 def test_fp8_e5m2_to_fp32():
     out = fp8e5_to_fp32(fp8_bits)
